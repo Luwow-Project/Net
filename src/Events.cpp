@@ -64,7 +64,12 @@ namespace Luwow::Net {
     void SocketBase::closeHandle() {
         if (closed) return;
         closed = true;
-        finishClose();
+        
+        if (activeOperations > 0) {
+            shutdownSocket(handle);
+        } else {
+            releaseHandle();
+        }
     }
 
     // The watcher's closure holds the socket (keeping it alive while watched), a pointer to it, and its events
