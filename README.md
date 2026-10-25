@@ -1,5 +1,5 @@
 # Net
-A TCP and UDP networking library for Luwow-Project.
+A TCP, UDP and HTTP networking library for Luwow-Project.
 
 This repository is not stand-alone. You must build it externally from within another
 repository like https://github.com/Luwow-Project/Release
@@ -8,7 +8,7 @@ repository like https://github.com/Luwow-Project/Release
 
 This project contains the sources for Luwow Net library.
 
-It uses the platform's sockets directly (Winsock on Windows, BSD sockets on macOS and Linux) and directly depends on the [Signal](https://github.com/Luwow-Project/Signal) library. Every operation is synchronous with an optional timeout, and operations that wait (resolving, connecting, accepting, receiving, sending) release the Luau state lock, so parallel libraries keep running meanwhile. The library only supports the `SERIAL` run mode.
+It uses the platform's sockets directly and directly depends on the [Signal](https://github.com/Luwow-Project/Signal) library. Every operation is synchronous with an optional timeout, and operations that wait (resolving, connecting, accepting, receiving, sending) release the Luau state lock, so parallel libraries keep running meanwhile.
 
 Errors raise Luau errors. Timeouts return nil, except for `send`, which raises since part of the data may already be sent.
 
@@ -29,6 +29,32 @@ Opens a UDP socket. Port 0, the default, picks a free port. `host` defaults to `
 ### `net.resolve(host: string) -> { string }`
 
 The numeric IPv4 and IPv6 addresses of a host name.
+
+### `net.request(request: HttpRequest) -> HttpResponse`
+
+Sends an HTTP or HTTPS request with the platform's client. They handle TLS, the system's proxy, redirects and gzip or deflate bodies. The request runs on a thread of its own while the calling coroutine yields.
+
+```luau
+local response = net.request({
+    url = "https://thumbnails.roblox.com/v1/assets?assetIds=1818&size=420x420&format=Png",
+    headers = { Accept = "application/json" },
+    timeout = 15,
+})
+if response.ok then
+    print(response.headers["content-type"], #response.body)
+end
+```
+
+| Request field | |
+|---|---|
+| `url: string` | An http or https URL |
+| `method: string?` | `"GET"` by default |
+| `headers: { [string]: string }?` | |
+| `body: (string \| buffer)?` | |
+| `timeout: number?` | Seconds for each step, as long as the system allows when nil |
+| `saveTo: string?` | A file a 2xx response's body is written to as it arrives, instead of being kept in memory. Its size shows the download's progress. |
+
+The response has `ok` (a 2xx status), `status`, `statusMessage`, `headers` (lowercase names, a repeated header's values joined with `", "`) `body`, a string that may hold binary data such as an image (empty when it was saved to `saveTo`), and `bodyLength`. Any status the server answers with is a response; failing to get one, such as for a host that can't be reached, raises.
 
 ## Sockets
 
@@ -73,8 +99,8 @@ local net = require("@Luwow/net")
 local task = require("@Luwow/task")
 
 local server = net.tcpListen(8080)
-server.connected:connect(function(socket)
-    socket.received:connect(function(data)
+server.connected:Connect(function(socket)
+    socket.received:Connect(function(data)
         socket:send(data) -- echo
     end)
 end)

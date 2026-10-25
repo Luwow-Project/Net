@@ -1,9 +1,13 @@
 #include "Library.h"
+#include "Http.h"
 #include "Platform.h"
 #include "Sockets.h"
 #include "SignalCore.h"
+#include "OffThread.h"
 #include "lualib.h"
 
+#include <cctype>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -29,7 +33,7 @@ namespace Luwow::Net {
         initializeSockets();
 
         lua_State* L = host->getMainState();
-        Signals::registerSignals(L);
+        Signals::registerSignals(L, host);
         TcpSocket::RegisterClass(L);
         TcpServer::RegisterClass(L);
         UdpSocket::RegisterClass(L);
@@ -126,6 +130,114 @@ namespace Luwow::Net {
         return 1;
     }
 
+    // The string field of the request table at index 1, raising when it's there but isn't a string
+    static bool optionalString(lua_State* L, const char* name, std::string& out) {
+        lua_getfield(L, 1, name);
+        if (lua_isnil(L, -1)) {
+            lua_pop(L, 1);
+            return false;
+        }
+        size_t length = 0;
+        const char* value = lua_isstring(L, -1) ? lua_tolstring(L, -1, &length) : nullptr;
+        if (!value) luaL_error(L, "the request's %s must be a string", name);
+        out.assign(value, length);
+        lua_pop(L, 1);
+        return true;
+    }
+
+    static void pushResponse(lua_State* L, const HttpResponse& response);
+
+    // net.request(options: {url, method?, headers?, body?, timeout?, saveTo?}) -> {ok, status, statusMessage, headers, body}
+    // Any status the server answers with is a response. Failing to get one raises.
+    static int net_request(lua_State* L) {
+        Library* net = getModuleInstance(L);
+        luaL_checktype(L, 1, LUA_TTABLE);
+
+        HttpRequest request;
+        if (!optionalString(L, "url", request.url)) luaL_error(L, "the request needs a url");
+        if (optionalString(L, "method", request.method)) {
+            for (char& c : request.method) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+
+        lua_getfield(L, 1, "headers");
+        if (!lua_isnil(L, -1)) {
+            if (!lua_istable(L, -1)) luaL_error(L, "the request's headers must be a table");
+            lua_pushnil(L);
+            while (lua_next(L, -2)) {
+                if (lua_type(L, -2) != LUA_TSTRING || !lua_isstring(L, -1)) luaL_error(L, "the request's headers must map names to strings");
+                request.headers.emplace_back(lua_tostring(L, -2), lua_tostring(L, -1));
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "body");
+        if (lua_isbuffer(L, -1)) {
+            size_t length = 0;
+            const char* data = static_cast<const char*>(lua_tobuffer(L, -1, &length));
+            request.body.assign(data, length);
+        } else if (!lua_isnil(L, -1)) {
+            size_t length = 0;
+            const char* data = lua_isstring(L, -1) ? lua_tolstring(L, -1, &length) : nullptr;
+            if (!data) luaL_error(L, "the request's body must be a string or a buffer");
+            request.body.assign(data, length);
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "timeout");
+        if (!lua_isnil(L, -1)) {
+            if (!lua_isnumber(L, -1)) luaL_error(L, "the request's timeout must be a number");
+            request.timeout = lua_tonumber(L, -1);
+        }
+        lua_pop(L, 1);
+        optionalString(L, "saveTo", request.saveTo);
+
+        // Run the network request off the thread, since they can take a while or fail.
+        return Luwow::Engine::runOffThread(L, net->getHost(), [request]() {
+            Luwow::Engine::OffThreadResult result;
+            auto response = std::make_shared<HttpResponse>();
+            std::string error;
+            if (!sendHttpRequest(request, *response, error)) {
+                result.error = "could not request " + request.url + ": " + error;
+                return result;
+            }
+            result.push = [response](lua_State* L) {
+                pushResponse(L, *response);
+                return 1;
+            };
+            return result;
+        });
+    }
+
+    // The response table net.request returns
+    static void pushResponse(lua_State* L, const HttpResponse& response) {
+        lua_createtable(L, 0, 6);
+        lua_pushboolean(L, response.status >= 200 && response.status < 300);
+        lua_setfield(L, -2, "ok");
+        lua_pushinteger(L, response.status);
+        lua_setfield(L, -2, "status");
+        lua_pushlstring(L, response.statusMessage.data(), response.statusMessage.size());
+        lua_setfield(L, -2, "statusMessage");
+
+        // Names are lowercase, since HTTP's are case insensitive. A repeated header's values are joined.
+        lua_createtable(L, 0, static_cast<int>(response.headers.size()));
+        for (const auto& [name, value] : response.headers) {
+            std::string key = name;
+            for (char& c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            lua_getfield(L, -1, key.c_str());
+            std::string joined = lua_isstring(L, -1) ? std::string(lua_tostring(L, -1)) + ", " + value : value;
+            lua_pop(L, 1);
+            lua_pushlstring(L, joined.data(), joined.size());
+            lua_setfield(L, -2, key.c_str());
+        }
+        lua_setfield(L, -2, "headers");
+
+        lua_pushlstring(L, response.body.data(), response.body.size());
+        lua_setfield(L, -2, "body");
+        lua_pushnumber(L, static_cast<double>(response.bodyLength));
+        lua_setfield(L, -2, "bodyLength");
+    }
+
     const char* Library::getModuleName() const {
         return "net";
     }
@@ -139,6 +251,7 @@ namespace Luwow::Net {
         { "tcpListen", net_tcpListen },
         { "udpBind", net_udpBind },
         { "resolve", net_resolve },
+        { "request", net_request, Luwow::Engine::finishOffThread },
         { nullptr, nullptr }
     };
 

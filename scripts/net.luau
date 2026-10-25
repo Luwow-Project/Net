@@ -42,7 +42,7 @@ export type TcpSocket = BaseSocket & {
 
 	-- Fires with the data each time some arrives. Reading it (or `disconnected`) makes the socket
 	-- read through its events: `receive` can't be used anymore, and the program stays alive until
-	-- the socket closes. Needs the task library.
+	-- the socket closes.
 	read received: Signal<string>,
 	-- Fires once when the other end closes the connection or it fails. The socket is closed by then.
 	read disconnected: Signal<()>,
@@ -69,7 +69,6 @@ export type TcpSocket = BaseSocket & {
 export type TcpServer = BaseSocket & {
 	-- Fires with each incoming connection. Reading it makes the server accept through its events:
 	-- `accept` can't be used anymore, and the program stays alive until the server closes.
-	-- Needs the task library.
 	read connected: Signal<TcpSocket>,
 
 	--[=[
@@ -151,6 +150,46 @@ end
 	@return Its numeric IPv4 and IPv6 addresses, without duplicates.
 ]=]
 function net.resolve(host: string): { string }
+    return nil :: any
+end
+
+export type HttpRequest = {
+	-- An http or https URL.
+	url: string,
+	-- "GET" by default.
+	method: string?,
+	headers: { [string]: string }?,
+	body: (string | buffer)?,
+	-- Seconds for each step: resolving, connecting, sending and receiving. Waits as long as the system
+	-- allows when nil.
+	timeout: number?,
+	-- A file a successful response's body is written to as it arrives, instead of being kept in
+	-- memory. Its size shows how far a download is.
+	saveTo: string?
+}
+
+export type HttpResponse = {
+	-- Whether the status is a success, 200 to 299.
+	ok: boolean,
+	status: number,
+	statusMessage: string,
+	-- Lowercase names, a repeated header's values joined with ", ".
+	headers: { [string]: string },
+	-- Empty when it was saved to saveTo.
+	body: string,
+	-- The body's length in bytes, saved or not.
+	bodyLength: number
+}
+
+--[=[
+	Sends an HTTP or HTTPS request with the platform's client,
+	which handles TLS, the system's proxy, redirects and compressed bodies. 
+	Raises when there's no response, such as when the host can't be reached.
+
+	@param request The request.
+	@return The response.
+]=]
+function net.request(request: HttpRequest): HttpResponse
     return nil :: any
 end
 

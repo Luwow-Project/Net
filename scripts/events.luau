@@ -4,13 +4,13 @@ local task = require("@Luwow/task")
 local server = net.tcpListen(0, "127.0.0.1")
 local port = server.localPort
 
-server.connected:connect(function(socket)
+server.connected:Connect(function(socket)
     print("server: connection from", socket.remoteAddress)
-    socket.received:connect(function(data)
+    socket.received:Connect(function(data)
         print("server: got", data)
         socket:send("echo:" .. data)
     end)
-    socket.disconnected:connect(function()
+    socket.disconnected:Connect(function()
         print("server: client left, closed =", socket.closed)
         server:close()
     end)
@@ -18,7 +18,7 @@ end)
 
 local client = net.tcpConnect("127.0.0.1", port)
 local replies = 0
-client.received:connect(function(data)
+client.received:Connect(function(data)
     print("client: got", data)
     replies += 1
     if replies == 2 then
@@ -32,7 +32,7 @@ client:send("two")
 
 -- UDP events
 local udp = net.udpBind(0, "127.0.0.1")
-udp.received:connect(function(data, host, p)
+udp.received:Connect(function(data, host, p)
     print("udp: got", data, "from", host)
     udp:close()
 end)
