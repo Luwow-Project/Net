@@ -6,6 +6,7 @@
 #include <winhttp.h>
 
 #include <cmath>
+#include <cstring>
 
 namespace Luwow::Net {
     static std::wstring widen(const std::string& text) {
@@ -123,8 +124,14 @@ namespace Luwow::Net {
             return false;
         }
 
+        // A body without a Content-Type is sent as application/x-www-form-urlencoded.
         std::wstring headers;
-        for (const auto& [name, value] : request.headers) headers += widen(name + ": " + value + "\r\n");
+        bool hasContentType = false;
+        for (const auto& [name, value] : request.headers) {
+            headers += widen(name + ": " + value + "\r\n");
+            if (_stricmp(name.c_str(), "Content-Type") == 0) hasContentType = true;
+        }
+        if (!request.body.empty() && !hasContentType) headers += L"Content-Type: application/x-www-form-urlencoded\r\n";
         void* body = request.body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<char*>(request.body.data());
         DWORD bodyLength = static_cast<DWORD>(request.body.size());
         if (!WinHttpSendRequest(handle.handle, headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
@@ -333,17 +340,13 @@ namespace Luwow::Net {
             curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(request.body.size()));
         }
 
-        // The request's headers as given.
+        // The request's headers as given. A body without a Content-Type is sent as
+        // application/x-www-form-urlencoded.
         curl_slist* headers = nullptr;
-        bool hasContentType = false;
         for (const auto& [name, value] : request.headers) {
             std::string line = name + ": " + value;
             headers = curl_slist_append(headers, line.c_str());
-            std::string lower = name;
-            for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (lower == "content-type") hasContentType = true;
         }
-        if (!request.body.empty() && !hasContentType) headers = curl_slist_append(headers, "Content-Type:");
         headers = curl_slist_append(headers, "Expect:");
         curl_easy_setopt(handle, CURLOPT_HTTPHEADER, headers);
 
