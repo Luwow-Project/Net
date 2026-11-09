@@ -18,8 +18,8 @@ target_include_directories(Luwow.NetLibrary PRIVATE ${NET_ROOT}/src)
 target_link_libraries(Luwow.NetLibrary PRIVATE Luwow.SignalCore)
 
 if(WIN32)
-    # Winsock, and WinHTTP for net.request
-    target_link_libraries(Luwow.NetLibrary PRIVATE ws2_32 winhttp)
+    # Winsock, WinHTTP for net.request
+    target_link_libraries(Luwow.NetLibrary PRIVATE ws2_32 winhttp kernel32)
 elseif(APPLE)
     # NSURLSession for net.request
     target_sources(Luwow.NetLibrary PRIVATE Http.mm)
